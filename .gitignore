@@ -5,3 +5,4 @@ keystore-pass.txt
 build/
 local.properties
 __pycache__/
+apk/
