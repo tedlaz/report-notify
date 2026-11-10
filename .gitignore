@@ -1,0 +1,7 @@
+pc/config.json
+*.keystore
+keystore-pass.txt
+.gradle/
+build/
+local.properties
+__pycache__/
