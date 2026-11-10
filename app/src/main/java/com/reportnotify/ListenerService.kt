@@ -10,7 +10,6 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.util.Log
 import org.json.JSONObject
-import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.concurrent.thread
@@ -18,16 +17,18 @@ import kotlin.concurrent.thread
 /** Keeps a streaming connection to ntfy (<topic>/json) open and turns each attachment into a stored report. */
 class ListenerService : Service() {
     @Volatile private var running = false
+    @Volatile private var conn: HttpURLConnection? = null
 
     override fun onBind(intent: Intent?) = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel("service", "Listener", NotificationManager.IMPORTANCE_MIN))
-        nm.createNotificationChannel(NotificationChannel("reports", "Reports", NotificationManager.IMPORTANCE_HIGH))
+        nm.createNotificationChannel(NotificationChannel("service", "Υπηρεσία", NotificationManager.IMPORTANCE_MIN))
+        nm.createNotificationChannel(NotificationChannel("reports", "Αναφορές", NotificationManager.IMPORTANCE_HIGH))
         val n = Notification.Builder(this, "service")
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
-            .setContentTitle("Listening for reports")
+            .setSmallIcon(R.drawable.ic_stat)
+            .setContentTitle("Σε αναμονή για αναφορές")
+            .setContentIntent(openApp(null))
             .setOngoing(true)
             .build()
         if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
@@ -41,6 +42,7 @@ class ListenerService : Service() {
 
     override fun onDestroy() {
         running = false
+        conn?.disconnect() // unblocks the reader thread (e.g. on re-pair)
         super.onDestroy()
     }
 
@@ -52,10 +54,11 @@ class ListenerService : Service() {
             try {
                 // since=<last id> replays anything missed while offline (ntfy.sh keeps ~12h).
                 val since = prefs(this).getString(KEY_LAST_ID, null) ?: "all"
-                val conn = URL("${pairing.topicUrl}/json?since=$since").openConnection() as HttpURLConnection
-                conn.connectTimeout = 15_000
-                conn.readTimeout = 120_000 // ntfy sends a keepalive every ~45s; silence longer than this = dead link
-                conn.inputStream.bufferedReader().useLines { lines ->
+                val c = URL("${pairing.topicUrl}/json?since=$since").openConnection() as HttpURLConnection
+                conn = c
+                c.connectTimeout = 15_000
+                c.readTimeout = 120_000 // ntfy sends a keepalive every ~45s; silence longer than this = dead link
+                c.inputStream.bufferedReader().useLines { lines ->
                     for (line in lines) {
                         if (!running) break
                         backoff = 1_000L
@@ -66,8 +69,9 @@ class ListenerService : Service() {
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "stream error", e)
+                if (running) Log.w(TAG, "stream error", e)
             }
+            if (!running) return
             Thread.sleep(backoff)
             backoff = minOf(backoff * 2, 60_000L)
         }
@@ -76,23 +80,35 @@ class ListenerService : Service() {
     private fun handle(p: Pairing, m: JSONObject) {
         val url = m.optJSONObject("attachment")?.optString("url")?.takeIf { it.isNotEmpty() } ?: return
         val blob = URL(url).openStream().use { it.readBytes() }
-        val html = decrypt(p.key, blob) // throws if tampered or wrong key
-        val title = m.optString("title").ifEmpty { "Report" }
-        val file = File(reportsDir(this), "${m.getLong("time")}_${m.getString("id")}.html")
-        file.writeBytes(html)
-        titles(this).edit().putString(file.name, title).apply()
+        val html = decrypt(p.key, blob).toString(Charsets.UTF_8) // throws if tampered or wrong key
+        val title = m.optString("title").ifEmpty { "Αναφορά" }
+        val preview = previewText(html)
+        val name = "${m.getLong("time")}_${m.getString("id")}.html"
+        reportFile(this, name).writeText(html)
+        titles(this).edit().putString(name, title).apply()
+        previews(this).edit().putString(name, preview).apply()
 
-        val open = Intent(this, MainActivity::class.java).putExtra(EXTRA_FILE, file.name)
-        val pi = PendingIntent.getActivity(this, file.name.hashCode(), open,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = Notification.Builder(this, "reports")
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setSmallIcon(R.drawable.ic_stat)
+            .setColor(getColor(R.color.brand))
             .setContentTitle(title)
-            .setContentText("Tap to open")
-            .setContentIntent(pi)
+            .setContentText(preview)
+            .setStyle(Notification.BigTextStyle().bigText(preview))
+            .setCategory(Notification.CATEGORY_MESSAGE)
+            .setWhen(m.getLong("time") * 1000)
+            .setShowWhen(true)
+            .setContentIntent(openApp(name))
             .setAutoCancel(true)
             .build()
-        getSystemService(NotificationManager::class.java).notify(file.name.hashCode(), n)
+        getSystemService(NotificationManager::class.java).notify(notifId(name), n)
+        sendBroadcast(Intent(ACTION_NEW_REPORT).setPackage(packageName)) // refresh the list if it is open
+    }
+
+    private fun openApp(name: String?): PendingIntent {
+        val i = Intent(this, MainActivity::class.java)
+        if (name != null) i.putExtra(EXTRA_FILE, name)
+        return PendingIntent.getActivity(this, name?.let(::notifId) ?: 0, i,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
     companion object { const val TAG = "ReportNotify" }

@@ -12,7 +12,9 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
-        versionName = "1.0.$versionCode"
+        // Tag builds (v1.2.3) set VERSION_NAME; branch builds are marked as dev.
+        versionName = System.getenv("VERSION_NAME")?.removePrefix("v")?.takeIf { it.isNotBlank() }
+            ?: "0.0.$versionCode-dev"
     }
 
     // Fixed keystore (from CI secrets) so new APKs install over old ones without losing reports.

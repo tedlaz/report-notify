@@ -18,6 +18,11 @@ class CoreTest {
         assertThrows(Exception::class.java) { decrypt(key, b) }
     }
 
+    @Test fun previewStripsMarkup() = assertEquals(
+        "Τίτλος A & B κείμενο",
+        previewText("<html><head><title>x</title><style>p{}</style></head><body><h2>Τίτλος</h2>\n<p>A &amp; B</p><script>alert(1)</script> κείμενο</body></html>"),
+    )
+
     @Test fun parsesPairing() {
         val p = Pairing.parse(" https://ntfy.sh/rabc/#AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8= ")
         assertEquals("https://ntfy.sh/rabc", p.topicUrl)
