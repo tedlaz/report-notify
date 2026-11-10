@@ -14,8 +14,10 @@ import json
 import os
 import secrets
 import sys
+import tempfile
 import urllib.parse
 import urllib.request
+import webbrowser
 from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -51,8 +53,16 @@ def show_qr() -> None:
 
     cfg = json.loads(CONFIG.read_text())
     pairing = f"{cfg['server']}/{cfg['topic']}#{cfg['key']}"
-    segno.make(pairing, error="m").terminal()  # ANSI colors, so it scans on dark terminals too
-    print("\nScan with the phone app (\"Scan QR\"), or paste:\n" + pairing)
+    # PNG in the default image viewer: terminal QR rendering is unreliable on Windows consoles.
+    fd, png = tempfile.mkstemp(suffix=".png")
+    os.close(fd)
+    try:
+        segno.make(pairing, error="m").save(png, scale=10, border=4)
+        webbrowser.open(Path(png).as_uri())
+        print("Scan the QR with the phone app (\"Scan QR\"), or paste:\n" + pairing)
+        input("\nPress Enter when done (the QR image is then deleted)...")
+    finally:
+        os.remove(png)  # it contains the key
 
 
 def send(src: str, title: str) -> None:
