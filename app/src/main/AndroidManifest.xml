@@ -12,6 +12,8 @@
         android:icon="@android:drawable/ic_dialog_email"
         android:theme="@android:style/Theme.Material.Light"
         android:allowBackup="false">
+        <!-- Ask Play services to fetch the QR scanner module at install time instead of on first scan. -->
+        <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode_ui" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -20,6 +20,9 @@ import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import java.io.File
 import java.util.Date
 
@@ -61,28 +64,40 @@ class MainActivity : Activity() {
 
     private fun showSetup() {
         showingReport = false
+        val scan = Button(this).apply { text = "Scan QR" }
+        // Google Play services scanner: its own camera UI, no CAMERA permission needed in this app.
+        scan.setOnClickListener {
+            GmsBarcodeScanning.getClient(this, GmsBarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_QR_CODE).build())
+                .startScan()
+                .addOnSuccessListener { b -> pair(b.rawValue.orEmpty()) }
+                .addOnFailureListener { e -> Toast.makeText(this, "Scan failed: ${e.message}", Toast.LENGTH_LONG).show() }
+        }
         val input = EditText(this).apply { hint = "https://ntfy.sh/<topic>#<key>" }
         val save = Button(this).apply { text = "Save" }
-        save.setOnClickListener {
-            val s = input.text.toString().trim()
-            val err = runCatching { Pairing.parse(s) }.exceptionOrNull()
-            if (err != null) { Toast.makeText(this, err.message, Toast.LENGTH_LONG).show(); return@setOnClickListener }
-            prefs(this).edit().putString(KEY_PAIRING, s).remove(KEY_LAST_ID).apply()
-            start()
-            // Without this exemption Doze cuts the network and reports arrive late.
-            if (!getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName))
-                startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
-            showList()
-        }
+        save.setOnClickListener { pair(input.text.toString()) }
         setContentView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(48, 96, 48, 48)
             addView(TextView(this@MainActivity).apply {
-                text = "Paste the pairing string from:\nuv run send_report.py --genkey"
+                text = "On the PC run:\nuv run send_report.py --genkey  (or --qr)\nthen scan the QR, or paste the string."
             })
+            addView(scan)
             addView(input)
             addView(save)
         })
+    }
+
+    private fun pair(raw: String) {
+        val s = raw.trim()
+        val err = runCatching { Pairing.parse(s) }.exceptionOrNull()
+        if (err != null) { Toast.makeText(this, "Not a pairing code: ${err.message}", Toast.LENGTH_LONG).show(); return }
+        prefs(this).edit().putString(KEY_PAIRING, s).remove(KEY_LAST_ID).apply()
+        start()
+        // Without this exemption Doze cuts the network and reports arrive late.
+        if (!getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName))
+            startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
+        showList()
     }
 
     private fun showList() {

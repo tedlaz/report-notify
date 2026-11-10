@@ -1,10 +1,11 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["cryptography"]
+# dependencies = ["cryptography", "segno"]
 # ///
 """Send an encrypted HTML report via ntfy to the Report Notify Android app.
 
-    uv run send_report.py --genkey               # once: create config.json + pairing string
+    uv run send_report.py --genkey               # once: create config.json + show pairing QR
+    uv run send_report.py --qr                   # show the pairing QR again
     uv run send_report.py report.html "Title"    # send a report
     some_cmd | uv run send_report.py - "Title"   # HTML from stdin
 """
@@ -42,8 +43,16 @@ def genkey() -> None:
         "key": base64.b64encode(os.urandom(32)).decode(),
     }
     CONFIG.write_text(json.dumps(cfg, indent=2))
-    print("Paste this into the phone app:\n")
-    print(f"{cfg['server']}/{cfg['topic']}#{cfg['key']}")
+    show_qr()
+
+
+def show_qr() -> None:
+    import segno
+
+    cfg = json.loads(CONFIG.read_text())
+    pairing = f"{cfg['server']}/{cfg['topic']}#{cfg['key']}"
+    segno.make(pairing, error="m").terminal()  # ANSI colors, so it scans on dark terminals too
+    print("\nScan with the phone app (\"Scan QR\"), or paste:\n" + pairing)
 
 
 def send(src: str, title: str) -> None:
@@ -60,6 +69,8 @@ def send(src: str, title: str) -> None:
 if __name__ == "__main__":
     if sys.argv[1:] == ["--genkey"]:
         genkey()
+    elif sys.argv[1:] == ["--qr"]:
+        show_qr()
     elif len(sys.argv) == 3:
         send(sys.argv[1], sys.argv[2])
     else:
